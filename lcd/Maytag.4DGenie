@@ -1,0 +1,235 @@
+﻿Version     0.0
+Platform    Gen4-uLCD-24PT-P
+PlatRes     240x320
+Depends
+end
+Options
+    Genie
+    Speed                        200000
+    Checksum                     No
+    ResponseSize                 2
+    Multidrop                    No
+    Destination                  1
+    DestBank                     0
+    MainForm                     0
+    SndBuf                       0
+    ButtonDisable                No
+    SignedDigits                 No
+    MaxString                    75
+    ComPort                      0
+    ComTX1pinIdx                 0
+    ComRX1pinIdx                 0
+end
+Form
+    Name                         Form0
+    Alias                        Form0
+    Bgtype                       Color
+    Color                        BLACK
+    Image                        (None)
+    Source.Height                0
+    Source.Left                  0
+    Source.Top                   0
+    Source.Width                 0
+    OnActivate                   ''
+    OnCreate                     ''
+    OnRepeat                     ''
+    OnTouchMoving                ''
+    OnTouchPressed               ''
+    OnTouchReleased              ''
+end
+RotarySwitch
+    Name                         Rotaryswitch0
+    Alias                        Rotaryswitch0
+    ButtonColor                  RED
+    Color                        BLACK
+    Font.Color                   clWhite
+    Font.Effects                 []
+    Font.Name                    Arial
+    Font.Size                    8
+    Font.Style                   []
+    Height                       225
+    LabelsOffset                 10
+    Left                         0
+    Radius                       110
+    ShowLabel                    Yes
+    SwitchAngleEnd               339
+    SwitchAngleStart             0
+    SwitchColor                  clSilver
+    SwitchPositions              \n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n
+    Top                          95
+    Width                        240
+    WinchColor                   clSilver
+    WinchOffset                  20
+    OnChanged                    'Report Message'
+    OnChanging                   Strings0Set
+end
+Strings
+    Name                         Strings0
+    Alias                        Strings0
+    Alignment                    Center
+    BGcolor                      BLACK
+    Height                       30
+    FGcolor                      WHITE
+    Font.Bold                    Yes
+    Font.CharSet                 ANSI
+    Font.Italic                  No
+    Font.Name                    Arial
+    Font.Opaque                  Yes
+    Font.Size                    26
+    Font.Strikethrough           No
+    Font.Underline               No
+    Left                         0
+    Strings                      'spin\nSOAK\nREGULAR\n9 min wash\n6 min wash\n3 min wash\nrinse\nspin\nPERMANENT PRESS\n9 min wash\n6 min wash\n3 min wash\ncool down rinse\nfinal rinse\nspin\nDELICATES\nrinse\n'
+    StringsStyle                 Message
+    Top                          65
+    Width                        240
+    OnChanged                    ''
+end
+UserButton
+    Name                         Userbutton0
+    Alias                        Userbutton0
+    Height                       48
+    Images                       icons8-washing-machine-48.png
+    Left                         0
+    Matrix                       -1
+    Momentary                    Yes
+    Stretch                      No
+    Top                          0
+    Width                        48
+    OnChanged                    'Report Message'
+end
+UserButton
+    Name                         Userbutton1
+    Alias                        Userbutton1
+    Height                       48
+    Images                       GO-Button.png
+    Left                         48
+    Matrix                       -1
+    Momentary                    Yes
+    Stretch                      No
+    Top                          0
+    Width                        78
+    OnChanged                    'Report Message'
+end
+Form
+    Name                         Form1
+    Alias                        Form1
+    Bgtype                       Color
+    Color                        BLACK
+    Image                        (None)
+    Source.Height                0
+    Source.Left                  0
+    Source.Top                   0
+    Source.Width                 0
+    OnActivate                   ''
+    OnCreate                     ''
+    OnRepeat                     ''
+    OnTouchMoving                ''
+    OnTouchPressed               ''
+    OnTouchReleased              ''
+end
+StaticText
+    Name                         Statictext0
+    Alias                        Statictext0
+    Alignment                    Left
+    AutoSize                     Yes
+    Caption                      :
+    Color                        BLACK
+    Font.Color                   WHITE
+    Font.Effects                 []
+    Font.Name                    Tahoma
+    Font.Size                    28
+    Font.Style                   []
+    Height                       57
+    Left                         118
+    Top                          256
+    Transparent                  Yes
+    Width                        13
+    WordWrap                     Yes
+end
+LedDigits
+    Name                         Leddigits0
+    Alias                        Leddigits0
+    Color                        BLACK
+    Decimals                     0
+    Digits                       3
+    Height                       60
+    LeadingZero                  No
+    Left                         1
+    OutlineColor                 BLACK
+    Palette.High                 clLime
+    Palette.Low                  0x141414
+    Top                          260
+    Width                        120
+    OnChanged                    ''
+    OnTouchMoving                ''
+    OnTouchPressed               ''
+    OnTouchReleased              ''
+end
+LedDigits
+    Name                         Leddigits1
+    Alias                        Leddigits1
+    Color                        BLACK
+    Decimals                     0
+    Digits                       2
+    Height                       60
+    LeadingZero                  Yes
+    Left                         134
+    OutlineColor                 BLACK
+    Palette.High                 clLime
+    Palette.Low                  0x141414
+    Top                          260
+    Width                        80
+    OnChanged                    ''
+    OnTouchMoving                ''
+    OnTouchPressed               ''
+    OnTouchReleased              ''
+end
+Strings
+    Name                         Strings1
+    Alias                        Strings1
+    Alignment                    Left
+    BGcolor                      BLACK
+    Height                       30
+    FGcolor                      WHITE
+    Font.Bold                    Yes
+    Font.CharSet                 ANSI
+    Font.Italic                  No
+    Font.Name                    Arial
+    Font.Opaque                  Yes
+    Font.Size                    26
+    Font.Strikethrough           No
+    Font.Underline               No
+    Left                         0
+    Strings                      'spin\nSOAK\nREGULAR\n9 min wash\n6 min wash\n3 min wash\nrinse\nspin\nPERMANENT PRESS\n9 min wash\n6 min wash\n3 min wash\ncool down rinse\nfinal rinse\nspin\nDELICATES\nrinse\n'
+    StringsStyle                 Message
+    Top                          65
+    Width                        240
+    OnChanged                    ''
+end
+UserButton
+    Name                         Userbutton2
+    Alias                        Userbutton2
+    Height                       48
+    Images                       icons8-washing-machine-off-48.png
+    Left                         191
+    Matrix                       -1
+    Momentary                    Yes
+    Stretch                      No
+    Top                          0
+    Width                        48
+    OnChanged                    'Report Message'
+end
+UserButton
+    Name                         Userbutton3
+    Alias                        Userbutton3
+    Height                       48
+    Images                       STOP-Button.png
+    Left                         114
+    Matrix                       -1
+    Momentary                    Yes
+    Stretch                      No
+    Top                          0
+    Width                        78
+    OnChanged                    'Report Message'
+end

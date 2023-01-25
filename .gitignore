@@ -1,0 +1,7 @@
+.vs
+ignore
+*~
+~*
+*.user
+bin/
+obj/
