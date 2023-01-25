@@ -7,11 +7,13 @@ support full motor current, which is specified as 7.5A.
 
 <p align='center'><img src='AsInstalled.jpg' alt='AsInstalled.jpg'/></p>
 
- A few parts, mostley from Sparkfun can be assembled to replace the timer in the Maytag LAT8504. All these
+ A few parts, mostly from Sparkfun, can be assembled to replace the timer in the Maytag LAT8504. All these
  parts together cost me less than half the cost of an exact replacement mechanical timer.
  <ul>
  <li> <a href='https://www.sparkfun.com/products/15795'>Qwiic Pro Micro USB-C</a></li>
- <li><a href='https://www.sparkfun.com/products/16566'>Qwiic Quad relay</a></li>
+ <li><a href='https://www.sparkfun.com/products/16566'>Qwiic Quad relay</a> for the qwiic
+version of the agitate/spin/soak relay. Or one each of the ANMBEST single and dual 5V coil relays, part ANMBEST_MD314-319 that I 
+got off amazon. The later is called "per pin" or "perPin" in the ino and STL. </li>
  <li><a href='https://www.sparkfun.com/products/16833'>Qwiic Quad Solid state relay kit</a></li>
  <li>Two opto isolators are also required, along with a 100K 1/4W resistor for each. A reverse diode is required
  as shown if the opto isolator is unidirectional. (The circuit diagram shows
@@ -23,9 +25,10 @@ support full motor current, which is specified as 7.5A.
  Four plastic pieces are needed to mount everything. 3D printable STL files are in the stl 
  directory.
 
- None of the original wires in the washer are cut, nor is the connector for the timer removed. Ot
- restore the original timer, only the 
- spade lugs at the water temperature switch need to be restored to their original connections, the MOLEX connector for this
+ None of the original wires in the washer are cut, nor is the connector for the timer removed. To
+ restore the original timer, the 
+ spade lugs at the water temperature switch need to be restored to their original connections, the 
+MOLEX connector for this
  device unplugged, the 3D printed plastic parts around the original timer hole removed, and the
  original timer installed and plugged into its original connector. The original connector is
  not plainly visible in the photos below, but its there along with all the wires connected to
@@ -33,7 +36,6 @@ support full motor current, which is specified as 7.5A.
 
  The Arduino Pro Micro is soldered to a slightly larger breadboard along with the optoisolators,
  associated resistors, and the 5 pin header for the LCD screen.
-
 
  Photos:
  <p align='center'><img src='Inside-front-panel-1.jpg' alt='Inside-front-panel-1.jpg'/></p>

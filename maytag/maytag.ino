@@ -3,15 +3,88 @@
 */
 // Serial is debug diagnostics on USB
 // Serial1 is the gen4-Ulcd-24PT
+#include <avr/wdt.h>
 #include <SparkFun_Qwiic_Relay.h>
 #include <genieArduino.h>
 #include "MaytagCycleDefinitions.h"
 
-#define DISABLE_SHUTDOWN_ON_SENSE_NO_AC 1 // not useful
+#define MECH_RELAY_TYPE 1 // 0 is qwiic, 1 is digital pin per output
+
 // All these conditional compile directives are 0 for production program
 #define INTERACTIVE_DEBUG_MODE 0
 #define SIMULATE_LIDandFULL 0
-#define AC_TIMER_STATS 0
+
+#define DIM(x) (sizeof(x)/sizeof(x[0]))
+
+class RelayPerPin {
+public:
+    RelayPerPin(int numRelayPins, const int pinsAssigned[])
+        : numRelays(numRelayPins)
+        , pins(pinsAssigned)
+    { }
+    int begin() 
+    {
+        for (int i = 0; i < numRelays; i++)
+        {
+            digitalWrite(pins[i], LOW);
+            pinMode(pins[i], OUTPUT);
+        }
+        return 1;
+    }
+    void turnAllRelaysOff()
+    {
+        for (int i = 0; i < numRelays; i++)
+            digitalWrite(pins[i], LOW);
+    }
+    void turnRelayOff(uint8_t which)
+    {
+        digitalWrite(pins[which-1], LOW);
+    }
+    void turnRelayOn(uint8_t which)
+    {
+        digitalWrite(pins[which-1], HIGH);
+    }
+private:
+    const int numRelays;
+    const int *pins;
+};
+
+static const int HISTORY_LENGTH = 100;
+class NoisyPollinPin {
+public:
+    NoisyPollinPin(int pin) 
+        : pinAssignment(pin)
+        , lastUpdate(0)
+        , next(0)
+    {
+        memset(history, 0, sizeof(history));
+    }
+    void setup()
+    {
+        pinMode(pinAssignment, INPUT_PULLUP);
+    }
+    void update(unsigned long now)
+    {
+        if (now == lastUpdate)
+            return;
+        lastUpdate = now;
+        history[next++] = digitalRead(pinAssignment) == LOW;
+        if (next >= HISTORY_LENGTH)
+            next = 0;
+    }
+    bool value() const
+    {
+        uint16_t ones(0);
+        for (int i = 0; i < HISTORY_LENGTH; i++)
+            if (history[i])  ones += 1;
+        return ones >= HISTORY_LENGTH / 4;
+    }
+private:
+    bool history[HISTORY_LENGTH];
+    uint16_t next;
+    unsigned long lastUpdate;
+    const int pinAssignment;
+};
 
 namespace {
     const uint8_t MECH_RELAY_I2CADDR = 0x6d;
@@ -26,11 +99,16 @@ namespace {
         RLYM_DIRECTION2 = 2,
         RLYM_SOAKLIGHT = 3};
 
-    const uint8_t PIN_LIDCLOSED_SENSE = 14;        // PCINT3
-    const uint8_t PIN_CLOSEDFULL_SENSE = 15;    // PCINT1
-    const uint8_t PIN_AC_SENSE = 16;            // PCINT2
-#if defined  (__AVR_ATmega32U4__) // PRO MICRO specific PCINT settings to sense 60HZ on/off
-    const uint8_t PIN_REGB_MASK = (1 << PCINT2) | (1 << PCINT1) | (1 << PCINT3);
+    const uint8_t PIN_LIDCLOSED_SENSE = 15;        
+    const uint8_t PIN_EMPTYFULL_SENSE = 16;    
+
+    const int PIN_RLYM_DIRECTION1 = 6;
+    const int PIN_RLYM_DIRECTION2 = 7;
+    const int PIN_RLYM_SOAK = 8;
+
+#if INTERACTIVE_DEBUG_MODE==0
+    const int PIN_LID = 30;
+    const int PIN_EMPTYFULL = 17;
 #endif
 
     const uint8_t PIN_WATERTEMP3 = 4;
@@ -38,27 +116,28 @@ namespace {
 
     const uint8_t PIN_RESETLCD = A3;
 
-    const int MSEC_AC_SENSE_ASSUME_OFF = 40;
+    const int MSEC_AC_SENSE_ASSUME_OFF = 100;
 
     enum {MAIN_KNOB_STOPPED, MAIN_KNOB_RUNNING}
         gMainKnobState = MAIN_KNOB_STOPPED;
 
     const uint8_t MOTOR_DIRECTION_RELAY_SETTLE_MSEC = 50;
 
-    enum { NUM_GENIE_DISPLAY_CYCLE_SETTINGS = 17, GENIE_DISPLAY_CYCLE_START = 8 };
+    enum { NUM_GENIE_DISPLAY_CYCLE_SETTINGS = 17, GENIE_DISPLAY_CYCLE_START = 2, GENIE_LOWEST_TIME_IDX = 8 };
     const uint16_t UserCycleToTime[NUM_GENIE_DISPLAY_CYCLE_SETTINGS] PROGMEM =
     {    // the genie object starts at angle 180.
         // the dryer display starts at angle 0
         2867, // spin
 
         3331, // SOAK
-        3780, // REGULAR
-        3780 + 180, // 9 min
-        3780 + 2 * 180, // 6 min
-        3780 + 3 * 180, // 3 min
+        3782, // REGULAR
+        3782 + 180, // 9 min
+        3782 + 2 * 180, // 6 min
+        3782 + 3 * 180, // 3 min
         4766, // rinse
-        4946, // spin
+        4955, // spin
 
+        // IDX = 8 = GENIE_LOWEST_TIME_IDX
         268, // PERMANENT PRESS
         268 + 180, // 9 min
         268 + 2 * 180, // 6 min
@@ -82,13 +161,25 @@ namespace {
     };
 
     void genieEvents();
-    void checkAdvanceTimer(uint16_t elapsedMsec);
+    void checkAdvanceTimer(int32_t elapsedMsec, bool advance);
     void applyStateToRelays();
-    void checkUpdateLEDcounter(uint16_t elapsedMsec);
+    void checkUpdateLEDcounter(int32_t elapsedMsec);
     void checkUpdateCycleDisplay();
     void checkUpdateMsecToIdx();
 
+#if MECH_RELAY_TYPE==0
     Qwiic_Relay mechRelays(MECH_RELAY_I2CADDR);
+#elif MECH_RELAY_TYPE==1
+    const int mechRelayPins[] = 
+    {   // order must match enum MechRelayAssign_t
+        PIN_RLYM_DIRECTION1,
+        PIN_RLYM_DIRECTION2,
+        PIN_RLYM_SOAK
+    };
+    RelayPerPin mechRelays(DIM(mechRelayPins), mechRelayPins);
+#else
+#error "Unknown MECH_RELAY_TYPE"
+#endif
     Qwiic_Relay ssRelays(SS_RELAY_IC2ADDR);
 
     uint16_t gTimerSequenceSeconds = 0; 
@@ -101,7 +192,6 @@ namespace {
     const int GENIE_USER_BUTTON1_ON_FORM1 = 2;
     const int GENIE_USER_BUTTON2_ON_FORM1 = 3;
 
-
 #if SIMULATE_LIDandFULL != 0
     bool lidClosed = false;
     bool tubFull = false;
@@ -113,11 +203,12 @@ namespace {
 
     bool userChangedCycleWhileStopped = true;
 
-    volatile unsigned long lastSawAConMsec; // updated on every 60Hz zero crossing
-    volatile unsigned long lastSawLidClosedMsec;
-    volatile bool haveSeenLidClosed;
-    volatile unsigned long lastSawTubFullMsec;
-    volatile bool haveSeenTubFull;
+    bool lidIsClosed;
+    bool tubIsFull;
+
+    NoisyPollinPin lidClosedPin(PIN_LIDCLOSED_SENSE);
+    NoisyPollinPin tubEmptyPin(PIN_EMPTYFULL_SENSE);
+
 }
 
 void setup()
@@ -155,24 +246,25 @@ void setup()
     genie.WriteObject(GENIE_OBJ_ROTARYSW, 0, GENIE_DISPLAY_CYCLE_START);
     genie.WriteObject(GENIE_OBJ_STRINGS, 0, GENIE_DISPLAY_CYCLE_START);
 
-    pinMode(PIN_LIDCLOSED_SENSE, INPUT_PULLUP);
-    pinMode(PIN_CLOSEDFULL_SENSE, INPUT_PULLUP);
     pinMode(PIN_WATERTEMP3, INPUT_PULLUP);
     pinMode(PIN_WATERTEMP4, INPUT_PULLUP);
-    pinMode(PIN_AC_SENSE, INPUT_PULLUP);
-    
-    memcpy_P(&gCurrentCycleDef, &MaytagLAT8504[0], sizeof(CycleDefinition));
-    lastSawAConMsec = millis(); // avoid power down on first call to loop()!
 
-#if defined  (__AVR_ATmega32U4__)
-    // Use pin change interrupts to sense 60Hz AC inputs
-    PCMSK0 |= PIN_REGB_MASK;
-    PCICR |= 1;
+#if INTERACTIVE_DEBUG_MODE==0
+    pinMode(PIN_LID, OUTPUT);
+    pinMode(PIN_EMPTYFULL, OUTPUT);
 #endif
+    
+    lidClosedPin.setup();
+    tubEmptyPin.setup();
+
+    memcpy_P(&gCurrentCycleDef, &MaytagLAT8504[0], sizeof(CycleDefinition));
+
+    wdt_enable(WDTO_8S);
 }
 
 void loop()
 {
+    wdt_reset();
 #if (INTERACTIVE_DEBUG_MODE)
     // only when built in this special debug mode do we take input
     while (Serial.available())
@@ -215,80 +307,27 @@ void loop()
 
     static unsigned long prevNow;
     unsigned long now = millis();
-    uint16_t elapsed = now - prevNow;
+    int32_t elapsed = now - prevNow;
     prevNow = now;
-
-#if (0 == DISABLE_SHUTDOWN_ON_SENSE_NO_AC)
-    noInterrupts();
-    auto prevACTime = lastSawAConMsec; 
-    interrupts();
-    int diffMsec = now - prevACTime;
-#if (AC_TIMER_STATS != 0) && (INTERACTIVE_DEBUG_MODE !=0)
-    {
-        // this printout helped figure out how to program the sensing of 60HZ input on/off
-        static uint16_t statCount = 0;
-        static uint32_t delTotal = 0;
-        static uint32_t delSquare = 0;
-        static uint16_t maxMsec = 0;
-        delTotal += diffMsec;
-        statCount += 1;
-        delSquare += diffMsec * diffMsec;
-        if (diffMsec > maxMsec)
-            maxMsec = diffMsec;
-        static unsigned long lastReportedStats;
-        auto msecSinceReported = now - lastReportedStats;
-        if (msecSinceReported > 100)
-        {
-            Serial.print("stats. N=");
-            Serial.print(statCount);
-            Serial.print(" T=");
-            Serial.print(delTotal);
-            Serial.print(" T2=");
-            Serial.print(delSquare);
-            Serial.print(" M=");
-            Serial.print(maxMsec);
-            Serial.print(" D=");
-            Serial.println(msecSinceReported);
-            delTotal = 0;
-            statCount = 0;
-            delSquare = 0;
-            maxMsec = 0;
-            lastReportedStats = now;
-        }
-    }
-#endif
-    bool shutdown = diffMsec > MSEC_AC_SENSE_ASSUME_OFF;
-    if (shutdown)
-    {   // if we see AC missing for MSEC_AC_SENSE_ASSUME_OFF,
-        // then try to command the solid state relays off in hopes of not sparking the 
-        // mechanical relays.
-        ssRelays.turnAllRelaysOff();
-#if (INTERACTIVE_DEBUG_MODE !=0)
-        Serial.println("power down");
-#else
-        for (;;); // die here. Power up reset is the only way out
-#endif
-    }
-#endif
 
     genie.DoEvents();
     bool isEnabled = gMainKnobState != MAIN_KNOB_STOPPED;
     if (!isEnabled)
     {
-        auto wasOn = ssRelays.getState(1);
+        auto wasOn = ssRelays.getState(RLYSS_MAIN_LINE);
         ssRelays.turnAllRelaysOff(); 
         if (wasOn)
             delay(MOTOR_DIRECTION_RELAY_SETTLE_MSEC); // when turning off, let solid state finish first.
         mechRelays.turnAllRelaysOff(); 
+        checkAdvanceTimer(elapsed, false);
         return;
     }
 
-    checkAdvanceTimer(elapsed);
+    checkAdvanceTimer(elapsed, true);
     checkUpdateLEDcounter(elapsed);
     checkUpdateMsecToIdx();
     applyStateToRelays();
 
-    ssRelays.turnRelayOn(RLYSS_MAIN_LINE);
 }
 
 namespace {
@@ -298,9 +337,9 @@ namespace {
         uint8_t highest = NUM_WASHER_TIMER_STEPS - 1;
         for (;;)
         {
-            uint8_t whichStep = (highest + lowest) / 2;
+            uint8_t whichStep = (highest + lowest) >> 1;
             uint16_t stepStartSeconds = pgm_read_word_near(&MaytagLAT8504[whichStep].timeStampSeconds);
-            int compare = stepStartSeconds - timerSequenceSeconds;
+            int16_t compare = stepStartSeconds - timerSequenceSeconds;
             if (compare == 0)
                 return whichStep;
             else if (compare < 0)
@@ -309,7 +348,7 @@ namespace {
                 highest = whichStep;
             uint8_t diff = highest - lowest;
             if (diff <= 1)
-            {
+            {   // down to only two candidates
                 stepStartSeconds = pgm_read_word_near(&MaytagLAT8504[highest].timeStampSeconds);
                 compare = stepStartSeconds - timerSequenceSeconds;
                 if (compare > 0)
@@ -330,24 +369,24 @@ namespace {
             Serial.print(genieObjValue);
             Serial.print(" seconds=");
             Serial.println(gTimerSequenceSeconds);
+            Serial.flush();
 #endif
         }
         gMainKnobState = MAIN_KNOB_RUNNING;
-        // The following two deal with the fact that 16 bit rollover of msec (every 64 seconds)
-        // the 60Hz sense would appear to be recent. If the the 60Hz input disappears and stays
-        // gone, then this digitalRead sets the record straight
-        haveSeenLidClosed = digitalRead(PIN_LIDCLOSED_SENSE) == LOW;
-        haveSeenTubFull = digitalRead(PIN_CLOSEDFULL_SENSE) == LOW;
+        ssRelays.turnRelayOn(RLYSS_MAIN_LINE);
+        auto now = millis();
+        while (millis() - now < MSEC_AC_SENSE_ASSUME_OFF)
+            checkAdvanceTimer(0,0);
     }
 
     uint8_t secTogenieIdx(uint16_t secs)
-    {    // OFF cycles at begining of definition map to end of previous cycle
-        if (secs < pgm_read_word_near(&UserCycleToTime[GENIE_DISPLAY_CYCLE_START]))
+    {    
+        if (secs < pgm_read_word_near(&UserCycleToTime[GENIE_LOWEST_TIME_IDX]))
             secs += TIMER_FULL_CYCLE; // modular on TIMER_FULL_CYCLE
         int i = 0;
         for (int j = 0; j < NUM_GENIE_DISPLAY_CYCLE_SETTINGS; j += 1)
         {
-            i = GENIE_DISPLAY_CYCLE_START - j - 1;
+            i = GENIE_LOWEST_TIME_IDX - j - 1;
             if (i < 0)
                 i += NUM_GENIE_DISPLAY_CYCLE_SETTINGS;
             uint16_t secondsStart = pgm_read_word_near(&UserCycleToTime[i]);
@@ -365,23 +404,26 @@ namespace {
         int i = secTogenieIdx(gTimerSequenceSeconds);
         genie.WriteObject(GENIE_OBJ_ROTARYSW, 0, i);
 #if (INTERACTIVE_DEBUG_MODE)
-        Serial.print("transitionOnToOff msec=");
+        Serial.print("transitionOnToOff sec=");
         Serial.print(gTimerSequenceSeconds);
         Serial.print(" idx="); Serial.print(i);
         Serial.println();
+        Serial.flush();
 #endif
     }
 
     void genieEvents()
     {
         genieFrame Event;
-        genie.DequeueEvent(&Event);
+        if (!genie.DequeueEvent(&Event))
+            return;
 #if (INTERACTIVE_DEBUG_MODE)
         Serial.print("Event cmd: ");
         Serial.print((int)Event.reportObject.cmd);
         Serial.print(" typ: "); Serial.print((int)Event.reportObject.object);
         Serial.print(" obj: "); Serial.print((int)Event.reportObject.index);
         Serial.print(" val: "); Serial.println((int)Event.reportObject.data_lsb | (int)(Event.reportObject.data_msb << 8));
+        Serial.flush();
 #endif
 
         if (genie.EventIs(&Event, GENIE_REPORT_EVENT, GENIE_OBJ_USERBUTTON, GENIE_USER_BUTTON1_ON_FORM0) ||
@@ -410,31 +452,20 @@ namespace {
         }
     }
 
-    void checkAdvanceTimer(uint16_t elapsedMsec)
+    void checkAdvanceTimer(int32_t elapsedMsec, bool advance)
     {
-        static uint16_t timerMsec;
+        static unsigned long lastPollTimestamp;
+        static int32_t timerMsec;
         auto now = millis();
 
 #if SIMULATE_LIDandFULL==0
-        // reading half a 60Hz input cycle.
-        noInterrupts();
-        auto prevLid = lastSawLidClosedMsec;
-        auto prevFull = lastSawTubFullMsec;
-        auto isClosedRecently = haveSeenLidClosed;
-        auto isFullRecently = haveSeenTubFull;
-        interrupts();
-
-        uint16_t diffLidMsec = now - prevLid;
-        uint16_t diffFullMsec = now - prevFull;
-        bool lidClosed = isClosedRecently && diffLidMsec < MSEC_AC_SENSE_ASSUME_OFF;
-        bool tubFull = isFullRecently && diffFullMsec < MSEC_AC_SENSE_ASSUME_OFF;
-
-        if (!lidClosed) // this "times out" the use of the last-seen time stamps until
-            haveSeenLidClosed = false;
-        if (!tubFull)
-            haveSeenTubFull = false;
+        lidClosedPin.update(now);
+        tubEmptyPin.update(now);
+        bool lidClosed = lidIsClosed = lidClosedPin.value();
+        bool tubFull = tubIsFull = tubEmptyPin.value();
 #else
-        haveSeenTubFull = tubFull;
+        lidIsClosed = lidClosed;
+        tubIsFull = tubFull;
 #endif
 
 #if (INTERACTIVE_DEBUG_MODE)
@@ -442,30 +473,47 @@ namespace {
             elapsedMsec *= 10;
 
         static int prevLidClosed = -1;
-        static int prevTubFull = -1;
         if ((int)lidClosed != prevLidClosed)
+        {
             Serial.println(lidClosed ? "Lid Closed" : "Lid Open");
+            Serial.flush();
+        }
         prevLidClosed = (int)lidClosed;
 
+        static int prevTubFull = -1;
         if ((int)tubFull != prevTubFull)
+        {
             Serial.println(tubFull ? "Tub Full" : "Tub Empty");
+            Serial.flush();
+        }
         prevTubFull = (int)tubFull;
 #endif
+#if INTERACTIVE_DEBUG_MODE==0
+        digitalWrite(PIN_LID, lidClosed ? LOW : HIGH);
+        digitalWrite(PIN_EMPTYFULL, tubFull ? LOW : HIGH);
+#endif
 
-        if (lidClosed)
+        if (advance)
         {
-            if ((TIMER_ON_CLOSED_LID == gCurrentCycleDef.timerEnableOnClosed) ||
-                (tubFull && (TIMER_ON_FULL == gCurrentCycleDef.timerEnableOnFull)))
+            if (lidClosed)
             {
-                timerMsec += elapsedMsec;
-                while (timerMsec >= 1000)
+                if ((TIMER_ON_CLOSED_LID == gCurrentCycleDef.timerEnableOnClosed) ||
+                    (tubFull && (TIMER_ON_FULL == gCurrentCycleDef.timerEnableOnFull)))
                 {
-                    gTimerSequenceSeconds += 1;
-                    while (gTimerSequenceSeconds >= TIMER_FULL_CYCLE)
-                        gTimerSequenceSeconds -= TIMER_FULL_CYCLE;
-                    timerMsec -= 1000;
+                    timerMsec += elapsedMsec;
+                    while (timerMsec >= 1000)
+                    {
+                        gTimerSequenceSeconds += 1;
+                        while (gTimerSequenceSeconds >= TIMER_FULL_CYCLE)
+                            gTimerSequenceSeconds -= TIMER_FULL_CYCLE;
+                        timerMsec -= 1000;
+                    }
                 }
+                else
+                    timerMsec = 0;
             }
+            else
+                timerMsec = 0;
         }
     }
 
@@ -478,37 +526,48 @@ namespace {
         {
             Serial.print("Moving to step idx="); Serial.print(step);
             Serial.print(" at seconds: "); Serial.println(gTimerSequenceSeconds);
+            Serial.flush();
         }
         prevStep = step;
 #endif
         memcpy_P(&gCurrentCycleDef, &MaytagLAT8504[step], sizeof(CycleDefinition));
         // don't command the direction control relay while the motor relay is on.
         bool motorWasOff = ssRelays.getState(RLYSS_MOTOR) == 0;
-        if (motorWasOff)
-        {
-            // the RLYM_DIRECTION relays are commanded in concert
-            if (gCurrentCycleDef.dir == CAM_AGITATE)
-            {
-                mechRelays.turnRelayOff(RLYM_DIRECTION1);
-                mechRelays.turnRelayOff(RLYM_DIRECTION2);
-            }
-            else
-            {
-                mechRelays.turnRelayOn(RLYM_DIRECTION1);
-                mechRelays.turnRelayOn(RLYM_DIRECTION2);
-            }
-        }
         // motorOn is CAM6 combined with either the water level, or CAM8+CAM10
         bool motorOn = (gCurrentCycleDef.motorEnable == MOTOR_ON)  &&
-            (haveSeenTubFull || 
+            (tubIsFull || 
                 (gCurrentCycleDef.timerEnableOnFull == TIMER_ON_FULL &&
                  gCurrentCycleDef.timerEnableOnClosed == TIMER_ON_CLOSED_LID));
         if (!motorOn)
+        {
             ssRelays.turnRelayOff(RLYSS_MOTOR);
+            if (!motorWasOff)
+                delay(MOTOR_DIRECTION_RELAY_SETTLE_MSEC);
+            mechRelays.turnRelayOff(RLYM_DIRECTION1);
+            mechRelays.turnRelayOff(RLYM_DIRECTION2);
+        }
         else
         {
             if (motorWasOff)
+            {
+#if (INTERACTIVE_DEBUG_MODE)
+                Serial.print("Turning motor on "); 
+                Serial.println(gCurrentCycleDef.dir == CAM_AGITATE ? "agitate" : "spin");
+                Serial.flush();
+#endif
+                // the RLYM_DIRECTION relays are commanded in concert
+                if (gCurrentCycleDef.dir == CAM_AGITATE)
+                {
+                    mechRelays.turnRelayOff(RLYM_DIRECTION1);
+                    mechRelays.turnRelayOff(RLYM_DIRECTION2);
+                }
+                else
+                {
+                    mechRelays.turnRelayOn(RLYM_DIRECTION1);
+                    mechRelays.turnRelayOn(RLYM_DIRECTION2);
+                }
                 delay(MOTOR_DIRECTION_RELAY_SETTLE_MSEC);
+            }
             ssRelays.turnRelayOn(RLYSS_MOTOR);
         }
 
@@ -521,7 +580,7 @@ namespace {
         int pinTemp4 = digitalRead(PIN_WATERTEMP4);
 
         // cold and hot equations are derived from inspection of the circuit diagram.
-        bool cold = (gCurrentCycleDef.coldWaterCam == TEMPERATURE_CAM_BOTTOM) ||
+        bool cold = ((gCurrentCycleDef.coldWaterCam == TEMPERATURE_CAM_BOTTOM) && lidIsClosed) ||
             (gCurrentCycleDef.coldWaterCam == TEMPERATURE_CAM_OFF && 
                 gCurrentCycleDef.hotWaterCam == TEMPERATURE_CAM_TOP) ||
             (gCurrentCycleDef.coldWaterCam == TEMPERATURE_CAM_TOP && pinTemp3 == LOW);
@@ -537,10 +596,14 @@ namespace {
             Serial.print(" cold="); Serial.print(cold ? "on" : "off");
             Serial.print(" hot="); Serial.print(hot ? "on" : "off");
             Serial.print(" at seconds: "); Serial.println(gTimerSequenceSeconds);
+            Serial.flush();
         }
         prevPin3 = pinTemp3;
         prevPin4 = pinTemp4;
 #endif
+
+        if (tubIsFull)
+            hot = cold = false;
 
         if (cold)
             ssRelays.turnRelayOn(RLYSS_COLD_WATER_FILL);
@@ -553,9 +616,9 @@ namespace {
             ssRelays.turnRelayOff(RLYSS_HOT_WATER_FILL);
     }
 
-    void checkUpdateLEDcounter(uint16_t elapsedMsec)
+    void checkUpdateLEDcounter(int32_t elapsedMsec)
     {
-        static uint16_t lastUpdatedLEDs = -1; // invalid state
+        static int32_t lastUpdatedLEDs = -1; // invalid state
         if (gMainKnobState != MAIN_KNOB_RUNNING)
             return;
         // line search the stop times for the first one bigger than now
@@ -576,12 +639,11 @@ namespace {
                     minutes = diff / 60;
                     lastUpdatedLEDs = diff;
                     lastSoakUpdateMsec = 0;
-                } else if ((i == INFINITE_SOAK_INDEX) && stopTime == gTimerSequenceSeconds)
+                } else if ((i == INFINITE_SOAK_INDEX) && (diff == 0))
                 {
                     lastSoakUpdateMsec += elapsedMsec;
                     uint16_t elapsed = lastSoakUpdateMsec / 1000;
                     seconds = elapsed % 60;
-
                     minutes = elapsed / 60;
                 }
                 if (seconds != lastSeconds)
@@ -602,32 +664,12 @@ namespace {
         if (i == lastUpdatedIdx)
             return;
         lastUpdatedIdx = i;
+#if (INTERACTIVE_DEBUG_MODE)
+        Serial.print("checkUpdateMsecToIdx update idx="); Serial.println(i); Serial.flush();
+#endif
+
         genie.WriteObject(GENIE_OBJ_ROTARYSW, 0, i);
         genie.WriteObject(GENIE_OBJ_STRINGS, 0, i);
         genie.WriteObject(GENIE_OBJ_STRINGS, 1, i);
     }
 }
-
-#if defined  (__AVR_ATmega32U4__)
-ISR(PCINT0_vect)
-{
-    auto now = millis();
-    uint8_t portB = PINB;
-    if ((portB & PIN_REGB_MASK) != PIN_REGB_MASK)
-    {    // if any of the bits is not set
-        if ((portB & (1 << PCINT3)) == 0)
-        {
-            lastSawLidClosedMsec = now;
-            haveSeenLidClosed = true;
-        }
-        if ((portB & (1 << PCINT1)) == 0)
-        {
-            lastSawTubFullMsec = now;
-            haveSeenTubFull = true;
-        }
-    }
-    lastSawAConMsec = now; // Line AC timestamp we update on any transition at all
-}
-#else
-#error "unsupported CPU"
-#endif
