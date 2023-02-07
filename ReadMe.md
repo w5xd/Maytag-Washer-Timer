@@ -16,9 +16,9 @@ version of the agitate/spin/soak relay. Or one each of the ANMBEST single and du
 got off amazon. The later is called "per pin" or "perPin" in the ino and STL. </li>
  <li><a href='https://www.sparkfun.com/products/16833'>Qwiic Quad Solid state relay kit</a></li>
  <li>Two opto isolators are also required, along with a 100K 1/4W resistor for each. A reverse diode is required
- as shown if the opto isolator is unidirectional. (The circuit diagram shows
- a third that senses line power from neutral, but the sketch doesn't use that input, and the 
- corresponding parts may be omitted.)
+ as shown if the opto isolator is unidirectional. Do not omit the 2.7K resistor across 
+the opto-isolator LED! It is required to prevent false positive signals to the Arduino for both tub full and
+lid closed.
  <li><a href='https://4dsystems.com.au/gen4-ulcd-24pt'>4D systems GEN4-ULCD-24PT</a>
  </ul>
 
@@ -26,15 +26,21 @@ got off amazon. The later is called "per pin" or "perPin" in the ino and STL. </
  directory.
 
  None of the original wires in the washer are cut, nor is the connector for the timer removed. To
- restore the original timer, the 
- spade lugs at the water temperature switch need to be restored to their original connections, the 
+ restore the original timer:
+<ul><li>The 
+ spade lugs at the water temperature switch need to be restored to their original connections
+<li>The spade lugs at the water level switch need to be resotred to their original connections (taking
+care that the added tap to the Neutral wire is tied down and insulated from connecting to anything.
+<li>the 
 MOLEX connector for this
- device unplugged, the 3D printed plastic parts around the original timer hole removed, and the
+ device unplugged
+<li> the 3D printed plastic parts around the original timer hole removed
+<li> the
  original timer installed and plugged into its original connector. The original connector is
  not plainly visible in the photos below, but its there along with all the wires connected to
  it.
-
- The Arduino Pro Micro is soldered to a slightly larger breadboard along with the optoisolators,
+</ul>
+The Arduino Pro Micro is soldered to a slightly larger breadboard along with the optoisolators,
  associated resistors, and the 5 pin header for the LCD screen.
 
  Photos:
