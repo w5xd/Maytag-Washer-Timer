@@ -41,7 +41,8 @@ MOLEX connector for this
  it.
 </ul>
 The Arduino Pro Micro is soldered to a slightly larger breadboard along with the optoisolators,
- associated resistors, and the 5 pin header for the LCD screen.
+ associated resistors, and the 5 pin header for the LCD screen. The circuit diagram is
+ here: <a href='Maytag Timer ugrade.pdf'>Maytag Timer ugrade.pdf</a>.
 
  Photos:
  <p align='center'><img src='Inside-front-panel-1.jpg' alt='Inside-front-panel-1.jpg'/></p>
