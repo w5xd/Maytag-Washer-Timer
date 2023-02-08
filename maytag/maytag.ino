@@ -1,5 +1,11 @@
 /* Maytag washer timer implementation.
-* 
+* This sketch runs on a Sparkfun Pro Micro and matches the behavior of the Maytag mechanical
+* timer LAT8504. There are 7 different relay outputs which correspond (roughly) the cams on
+* the mechanical timer. There are two input pins that sense the position of two switches
+* in the washer: the lid-closed switch and the tub-full switch. The mechanical switches
+* retain (most of) their original functions, but this sketch also needs to know their
+* positions in order to advance the cycle timer, or wait for something to happen, i.e. for
+* the tub to fill, or the lid to close.
 */
 // Serial is debug diagnostics on USB
 // Serial1 is the gen4-Ulcd-24PT
@@ -8,6 +14,9 @@
 #include <genieArduino.h>
 #include "MaytagCycleDefinitions.h"
 
+// I built the first iteration with two qwiic relay boards, but had a failure in one of them
+// and found it easier to replace it with discrete relays. The qwiic codes are under
+// conditional compile on MECH_RELAY_TYPE
 #define MECH_RELAY_TYPE 1 // 0 is qwiic, 1 is digital pin per output
 
 // All these conditional compile directives are 0 for production program
@@ -17,6 +26,8 @@
 #define DIM(x) (sizeof(x)/sizeof(x[0]))
 
 class RelayPerPin {
+    // This class has mostly the same methods as Sparkfun's qwiic relay
+    // class for ease in switching this sketch between the two different hardware versions.
 public:
     RelayPerPin(int numRelayPins, const int pinsAssigned[])
         : numRelays(numRelayPins)
@@ -56,8 +67,8 @@ public:
         : pinAssignment(pin)
         , lastUpdate(0)
         , next(0)
+        , history({})
     {
-        memset(history, 0, sizeof(history));
     }
     void setup()
     {
@@ -66,7 +77,7 @@ public:
     void update(unsigned long now)
     {
         if (now == lastUpdate)
-            return;
+            return; // at most one sample per msec
         lastUpdate = now;
         history[next++] = digitalRead(pinAssignment) == LOW;
         if (next >= HISTORY_LENGTH)
@@ -107,8 +118,9 @@ namespace {
     const int PIN_RLYM_SOAK = 8;
 
 #if INTERACTIVE_DEBUG_MODE==0
-    const int PIN_LID = 30;
-    const int PIN_EMPTYFULL = 17;
+    // The Pro Micro has a couple of LEDs that are used by the USB serial, but in this compiled mode, there is no USB
+    const int PIN_LID_LED = 30;
+    const int PIN_EMPTYFULL_LED = 17;
 #endif
 
     const uint8_t PIN_WATERTEMP3 = 4;
@@ -123,7 +135,9 @@ namespace {
 
     const uint8_t MOTOR_DIRECTION_RELAY_SETTLE_MSEC = 50;
 
+    // The design for the genie display has 17 "settings." This enumeration must match what the genie has
     enum { NUM_GENIE_DISPLAY_CYCLE_SETTINGS = 17, GENIE_DISPLAY_CYCLE_START = 2, GENIE_LOWEST_TIME_IDX = 8 };
+    // Those 17 settings correspond rougly to the labeling on the washer's front panel around its original timer.
     const uint16_t UserCycleToTime[NUM_GENIE_DISPLAY_CYCLE_SETTINGS] PROGMEM =
     {    // the genie object starts at angle 180.
         // the dryer display starts at angle 0
@@ -208,7 +222,6 @@ namespace {
 
     NoisyPollinPin lidClosedPin(PIN_LIDCLOSED_SENSE);
     NoisyPollinPin tubEmptyPin(PIN_EMPTYFULL_SENSE);
-
 }
 
 void setup()
@@ -250,8 +263,8 @@ void setup()
     pinMode(PIN_WATERTEMP4, INPUT_PULLUP);
 
 #if INTERACTIVE_DEBUG_MODE==0
-    pinMode(PIN_LID, OUTPUT);
-    pinMode(PIN_EMPTYFULL, OUTPUT);
+    pinMode(PIN_LID_LED, OUTPUT);
+    pinMode(PIN_EMPTYFULL_LED, OUTPUT);
 #endif
     
     lidClosedPin.setup();
@@ -259,6 +272,7 @@ void setup()
 
     memcpy_P(&gCurrentCycleDef, &MaytagLAT8504[0], sizeof(CycleDefinition));
 
+    // watch dog timer. If this sketch fails to run, then reset the Arduino, which turns off the washing machine.
     wdt_enable(WDTO_8S);
 }
 
@@ -319,7 +333,8 @@ void loop()
         if (wasOn)
             delay(MOTOR_DIRECTION_RELAY_SETTLE_MSEC); // when turning off, let solid state finish first.
         mechRelays.turnAllRelaysOff(); 
-        checkAdvanceTimer(elapsed, false);
+        checkAdvanceTimer(elapsed, false); // keeps the tub full LED up to date.
+        // the lid closed LED can't be updated with RLYSS_MAIN_LINE off (see the circuit diagram)
         return;
     }
 
@@ -327,7 +342,6 @@ void loop()
     checkUpdateLEDcounter(elapsed);
     checkUpdateMsecToIdx();
     applyStateToRelays();
-
 }
 
 namespace {
@@ -374,6 +388,7 @@ namespace {
         }
         gMainKnobState = MAIN_KNOB_RUNNING;
         ssRelays.turnRelayOn(RLYSS_MAIN_LINE);
+        // With RLYSS_MAIN_LINE on, poll the lid closed sensor for 100msec to get its state right.
         auto now = millis();
         while (millis() - now < MSEC_AC_SENSE_ASSUME_OFF)
             checkAdvanceTimer(0,0);
@@ -489,8 +504,8 @@ namespace {
         prevTubFull = (int)tubFull;
 #endif
 #if INTERACTIVE_DEBUG_MODE==0
-        digitalWrite(PIN_LID, lidClosed ? LOW : HIGH);
-        digitalWrite(PIN_EMPTYFULL, tubFull ? LOW : HIGH);
+        digitalWrite(PIN_LID_LED, lidClosed ? LOW : HIGH);
+        digitalWrite(PIN_EMPTYFULL_LED, tubFull ? LOW : HIGH);
 #endif
 
         if (advance)
