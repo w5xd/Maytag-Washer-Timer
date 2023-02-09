@@ -477,7 +477,7 @@ namespace {
         lidClosedPin.update(now);
         tubEmptyPin.update(now);
         bool lidClosed = lidIsClosed = lidClosedPin.value();
-        bool tubFull = tubIsFull = tubEmptyPin.value();
+        bool tubFull = tubIsFull = !tubEmptyPin.value();
 #else
         lidIsClosed = lidClosed;
         tubIsFull = tubFull;
