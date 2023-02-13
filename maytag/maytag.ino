@@ -221,7 +221,7 @@ namespace {
     bool tubIsFull;
 
     NoisyPollinPin lidClosedPin(PIN_LIDCLOSED_SENSE);
-    NoisyPollinPin tubEmptyPin(PIN_EMPTYFULL_SENSE);
+    NoisyPollinPin tubFullPin(PIN_EMPTYFULL_SENSE);
 }
 
 void setup()
@@ -268,7 +268,7 @@ void setup()
 #endif
     
     lidClosedPin.setup();
-    tubEmptyPin.setup();
+    tubFullPin.setup();
 
     memcpy_P(&gCurrentCycleDef, &MaytagLAT8504[0], sizeof(CycleDefinition));
 
@@ -475,9 +475,9 @@ namespace {
 
 #if SIMULATE_LIDandFULL==0
         lidClosedPin.update(now);
-        tubEmptyPin.update(now);
+        tubFullPin.update(now);
         bool lidClosed = lidIsClosed = lidClosedPin.value();
-        bool tubFull = tubIsFull = !tubEmptyPin.value();
+        bool tubFull = tubIsFull = tubFullPin.value();
 #else
         lidIsClosed = lidClosed;
         tubIsFull = tubFull;
